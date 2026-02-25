@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hospital ER Simulation</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ── RESET & BASE ── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f172a;--surface:#1e293b;--surface2:#334155;--border:#475569;
+  --text:#e2e8f0;--text2:#94a3b8;--accent:#3b82f6;--accent2:#60a5fa;
+  --green:#22c55e;--red:#ef4444;--orange:#f59e0b;--purple:#a855f7;
+  --cyan:#06b6d4;--pink:#ec4899;
+  --radius:12px;--shadow:0 4px 24px rgba(0,0,0,.4);
+}
+html{font-size:14px}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* ── HEADER ── */
+.header{background:linear-gradient(135deg,#1e3a5f 0%,#0f172a 100%);border-bottom:1px solid var(--border);padding:1.2rem 2rem;display:flex;align-items:center;gap:1rem;position:sticky;top:0;z-index:100;backdrop-filter:blur(12px)}
+.header .logo{font-size:1.8rem}
+.header h1{font-size:1.4rem;font-weight:700;letter-spacing:-.02em}
+.header h1 span{color:var(--accent2);font-weight:800}
+.header .subtitle{color:var(--text2);font-size:.85rem;margin-left:auto}
+
+/* ── LAYOUT ── */
+.main{max-width:1440px;margin:0 auto;padding:1.5rem}
+.tabs{display:flex;gap:.5rem;margin-bottom:1.5rem;border-bottom:2px solid var(--surface2);padding-bottom:.5rem}
+.tab{padding:.6rem 1.4rem;border-radius:var(--radius) var(--radius) 0 0;cursor:pointer;color:var(--text2);font-weight:500;transition:all .2s;border:1px solid transparent;border-bottom:none;font-size:.9rem}
+.tab:hover{color:var(--text);background:var(--surface)}
+.tab.active{color:var(--accent2);background:var(--surface);border-color:var(--border)}
+.tab-content{display:none}
+.tab-content.active{display:block}
+
+/* ── CARDS ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;box-shadow:var(--shadow)}
+.card h3{font-size:1rem;font-weight:600;margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+.card h3 .icon{font-size:1.2rem}
+
+/* ── GRID LAYOUTS ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+
+/* ── CONTROL PANEL ── */
+.controls{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.8rem;margin-bottom:1rem}
+.control-group{display:flex;flex-direction:column;gap:.3rem}
+.control-group label{font-size:.75rem;color:var(--text2);font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+.control-group input,.control-group select{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem;color:var(--text);font-size:.9rem;font-family:inherit;transition:border-color .2s}
+.control-group input:focus{outline:none;border-color:var(--accent)}
+
+/* ── BUTTONS ── */
+.btn{padding:.7rem 1.8rem;border:none;border-radius:8px;font-weight:600;font-size:.9rem;cursor:pointer;transition:all .2s;font-family:inherit;display:inline-flex;align-items:center;gap:.5rem}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff}
+.btn-primary:hover{filter:brightness(1.15);transform:translateY(-1px)}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-danger{background:var(--red);color:#fff}
+.btn-danger:hover{filter:brightness(1.15)}
+.btn-group{display:flex;gap:.8rem;margin-top:.5rem;align-items:center}
+
+/* ── PROGRESS BAR ── */
+.progress-container{margin:1rem 0;position:relative}
+.progress-bar{height:8px;background:var(--bg);border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--purple));border-radius:4px;transition:width .3s ease;width:0}
+.progress-text{font-size:.8rem;color:var(--text2);margin-top:.4rem;display:flex;justify-content:space-between}
+
+/* ── KPI CARDS ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8rem;margin-bottom:1.2rem}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;text-align:center;transition:transform .2s,border-color .2s}
+.kpi:hover{transform:translateY(-2px);border-color:var(--accent)}
+.kpi .value{font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,var(--accent2),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi .label{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.kpi.green .value{background:linear-gradient(135deg,var(--green),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi.orange .value{background:linear-gradient(135deg,var(--orange),var(--red));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi.purple .value{background:linear-gradient(135deg,var(--purple),var(--pink));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+
+/* ── PATIENT FLOW ANIMATION ── */
+.flow-container{position:relative;background:var(--bg);border-radius:var(--radius);padding:1.5rem;overflow:hidden;min-height:200px}
+.flow-stages{display:flex;align-items:center;justify-content:space-between;gap:.3rem;flex-wrap:nowrap}
+.flow-stage{display:flex;flex-direction:column;align-items:center;gap:.4rem;flex:1;min-width:80px}
+.flow-stage .stage-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.4rem;border:2px solid var(--border);transition:all .4s;position:relative}
+.flow-stage .stage-icon.active{border-color:var(--accent);box-shadow:0 0 16px rgba(59,130,246,.4);animation:pulse-glow 2s infinite}
+.flow-stage .stage-name{font-size:.65rem;color:var(--text2);text-align:center;font-weight:500}
+.flow-stage .stage-count{font-size:.85rem;font-weight:700;color:var(--accent2)}
+.flow-arrow{color:var(--border);font-size:1rem;flex-shrink:0}
+.flow-arrow.active{color:var(--accent2)}
+@keyframes pulse-glow{0%,100%{box-shadow:0 0 8px rgba(59,130,246,.3)}50%{box-shadow:0 0 20px rgba(59,130,246,.6)}}
+
+/* ── RESOURCE BARS ── */
+.resource-bar{margin-bottom:1rem}
+.resource-bar .bar-header{display:flex;justify-content:space-between;margin-bottom:.3rem}
+.resource-bar .bar-header .name{font-size:.8rem;font-weight:500}
+.resource-bar .bar-header .pct{font-size:.8rem;font-weight:700}
+.resource-bar .bar-track{height:10px;background:var(--bg);border-radius:5px;overflow:hidden}
+.resource-bar .bar-value{height:100%;border-radius:5px;transition:width .5s ease;min-width:2px}
+.bar-value.blue{background:linear-gradient(90deg,var(--accent),var(--cyan))}
+.bar-value.green{background:linear-gradient(90deg,var(--green),#4ade80)}
+.bar-value.orange{background:linear-gradient(90deg,var(--orange),var(--red))}
+.bar-value.purple{background:linear-gradient(90deg,var(--purple),var(--pink))}
+
+/* ── EVENT LOG ── */
+.event-log{max-height:250px;overflow-y:auto;font-family:'Courier New',monospace;font-size:.75rem;line-height:1.6;background:var(--bg);border-radius:8px;padding:.8rem}
+.event-log::-webkit-scrollbar{width:6px}
+.event-log::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:3px}
+.event-entry{display:flex;gap:.8rem;padding:2px 0}
+.event-entry .time{color:var(--cyan);min-width:65px}
+.event-entry .pid{color:var(--orange);min-width:45px}
+.event-entry .evt{color:var(--text2)}
+
+/* ── TABLE ── */
+.table-wrap{overflow-x:auto;max-height:500px;overflow-y:auto}
+.table-wrap::-webkit-scrollbar{width:6px;height:6px}
+.table-wrap::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:3px}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th{position:sticky;top:0;background:var(--surface2);color:var(--text);padding:.6rem .5rem;text-align:right;font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid var(--border);z-index:1}
+th:first-child{text-align:left}
+td{padding:.5rem .5rem;border-bottom:1px solid rgba(71,85,105,.3);text-align:right;font-variant-numeric:tabular-nums}
+td:first-child{text-align:left;font-weight:600}
+tr:hover td{background:rgba(59,130,246,.05)}
+
+/* ── CHART CONTAINERS ── */
+.chart-box{position:relative;height:280px}
+
+/* ── STATUS BADGE ── */
+.status-badge{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .8rem;border-radius:20px;font-size:.75rem;font-weight:600}
+.status-badge.idle{background:rgba(148,163,184,.15);color:var(--text2)}
+.status-badge.running{background:rgba(59,130,246,.15);color:var(--accent2)}
+.status-badge.complete{background:rgba(34,197,94,.15);color:var(--green)}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.idle{background:var(--text2)}
+.status-dot.running{background:var(--accent2);animation:blink 1s infinite}
+.status-dot.complete{background:var(--green)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── SUMMARY SECTION ── */
+.summary-metric{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid rgba(71,85,105,.3)}
+.summary-metric:last-child{border-bottom:none}
+.summary-metric .metric-name{font-size:.85rem;color:var(--text2)}
+.summary-metric .metric-val{font-size:1rem;font-weight:700}
+.summary-metric .metric-ci{font-size:.7rem;color:var(--text2);margin-left:.5rem}
+
+.hidden{display:none !important}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--surface2);border-radius:4px}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════ HEADER ══════════════════════ -->
+<div class="header">
+  <div class="logo">🏥</div>
+  <h1>Hospital <span>Emergency Room</span> Simulation</h1>
+  <div style="display:flex;align-items:center;gap:1rem;margin-left:auto">
+    <div id="statusBadge" class="status-badge idle"><span class="status-dot idle" id="statusDot"></span><span id="statusText">Idle</span></div>
+  </div>
+</div>
+
+<!-- ══════════════════════ MAIN ══════════════════════ -->
+<div class="main">
+
+<!-- TABS -->
+<div class="tabs">
+  <div class="tab active" data-tab="sim" onclick="switchTab('sim')">⚡ Simulation</div>
+  <div class="tab" data-tab="results" onclick="switchTab('results')">📊 Results</div>
+  <div class="tab" data-tab="details" onclick="switchTab('details')">📋 Details</div>
+</div>
+
+<!-- ═══════ TAB 1: SIMULATION ═══════ -->
+<div id="tab-sim" class="tab-content active">
+
+  <!-- Control Panel -->
+  <div class="card" style="margin-bottom:1rem">
+    <h3><span class="icon">⚙️</span> Simulation Parameters</h3>
+    <div class="controls">
+      <div class="control-group">
+        <label>Duration (min)</label>
+        <input type="number" id="sim_duration" value="1440" min="60" max="14400">
+      </div>
+      <div class="control-group">
+        <label>Warm-up (min)</label>
+        <input type="number" id="warmup_period" value="0" min="0">
+      </div>
+      <div class="control-group">
+        <label>Replications</label>
+        <input type="number" id="num_replications" value="30" min="1" max="100">
+      </div>
+      <div class="control-group">
+        <label>Mean Interarrival</label>
+        <input type="number" id="mean_interarrival" value="6" min="1" max="60" step="0.5">
+      </div>
+      <div class="control-group">
+        <label>Triage Nurses</label>
+        <input type="number" id="num_triage_nurses" value="1" min="1" max="10">
+      </div>
+      <div class="control-group">
+        <label>Admin Staff</label>
+        <input type="number" id="num_admin_staff" value="1" min="1" max="10">
+      </div>
+      <div class="control-group">
+        <label>ER Beds</label>
+        <input type="number" id="num_er_beds" value="10" min="1" max="100">
+      </div>
+      <div class="control-group">
+        <label>Doctors</label>
+        <input type="number" id="num_doctors" value="2" min="1" max="20">
+      </div>
+      <div class="control-group">
+        <label>Nurses (implied)</label>
+        <input type="number" id="num_nurses" value="4" min="1" max="20">
+      </div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btnStart" onclick="startSim()">▶ Run Simulation</button>
+      <button class="btn btn-danger hidden" id="btnStop" onclick="stopSim()">⏹ Stop</button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-container hidden" id="progressSection">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-text"><span id="progressLabel">Replication 0/0</span><span id="progressPct">0%</span></div>
+  </div>
+
+  <!-- LIVE DASHBOARD -->
+  <div id="liveDashboard" class="hidden">
+    <!-- KPI Strip -->
+    <div class="kpi-grid" id="liveKpis">
+      <div class="kpi"><div class="value" id="kpi-time">00:00</div><div class="label">Sim Time</div></div>
+      <div class="kpi green"><div class="value" id="kpi-arrivals">0</div><div class="label">Arrivals</div></div>
+      <div class="kpi purple"><div class="value" id="kpi-discharged">0</div><div class="label">Discharged</div></div>
+      <div class="kpi orange"><div class="value" id="kpi-insystem">0</div><div class="label">In System</div></div>
+      <div class="kpi"><div class="value" id="kpi-beds">0/10</div><div class="label">Beds Used</div></div>
+      <div class="kpi green"><div class="value" id="kpi-bedocc">0%</div><div class="label">Bed Occ.</div></div>
+    </div>
+
+    <!-- Patient Flow Animation -->
+    <div class="card" style="margin-bottom:1rem">
+      <h3><span class="icon">🚶</span> Patient Flow (Live)</h3>
+      <div class="flow-container">
+        <div class="flow-stages">
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-entrance" style="background:rgba(59,130,246,.1)">🚪</div>
+            <div class="stage-name">Entrance</div>
+            <div class="stage-count" id="fc-entrance">-</div>
+          </div>
+          <div class="flow-arrow" id="fa1">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-triage" style="background:rgba(168,85,247,.1)">🩺</div>
+            <div class="stage-name">Triage</div>
+            <div class="stage-count" id="fc-triage">Q: 0</div>
+          </div>
+          <div class="flow-arrow" id="fa2">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-reg" style="background:rgba(6,182,212,.1)">📋</div>
+            <div class="stage-name">Registration</div>
+            <div class="stage-count" id="fc-reg">Q: 0</div>
+          </div>
+          <div class="flow-arrow" id="fa3">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-bed" style="background:rgba(245,158,11,.1)">🛏️</div>
+            <div class="stage-name">Bed Queue</div>
+            <div class="stage-count" id="fc-bed">Q: 0</div>
+          </div>
+          <div class="flow-arrow" id="fa4">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-doctor" style="background:rgba(34,197,94,.1)">👨‍⚕️</div>
+            <div class="stage-name">Doctor</div>
+            <div class="stage-count" id="fc-doctor">Q: 0</div>
+          </div>
+          <div class="flow-arrow" id="fa5">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-treat" style="background:rgba(236,72,153,.1)">💊</div>
+            <div class="stage-name">Treatment</div>
+            <div class="stage-count" id="fc-treat">-</div>
+          </div>
+          <div class="flow-arrow" id="fa6">→</div>
+          <div class="flow-stage">
+            <div class="stage-icon" id="fs-exit" style="background:rgba(34,197,94,.1)">🏠</div>
+            <div class="stage-name">Exit</div>
+            <div class="stage-count" id="fc-exit">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:1rem">
+      <!-- Resource Utilization -->
+      <div class="card">
+        <h3><span class="icon">📊</span> Resource Utilization (Live)</h3>
+        <div class="resource-bar">
+          <div class="bar-header"><span class="name">🩺 Triage Nurse</span><span class="pct" id="bar-triage-pct">0%</span></div>
+          <div class="bar-track"><div class="bar-value purple" id="bar-triage" style="width:0%"></div></div>
+        </div>
+        <div class="resource-bar">
+          <div class="bar-header"><span class="name">📋 Admin Staff</span><span class="pct" id="bar-admin-pct">0%</span></div>
+          <div class="bar-track"><div class="bar-value blue" id="bar-admin" style="width:0%"></div></div>
+        </div>
+        <div class="resource-bar">
+          <div class="bar-header"><span class="name">🛏️ ER Beds</span><span class="pct" id="bar-beds-pct">0%</span></div>
+          <div class="bar-track"><div class="bar-value green" id="bar-beds" style="width:0%"></div></div>
+        </div>
+        <div class="resource-bar">
+          <div class="bar-header"><span class="name">👨‍⚕️ Doctors</span><span class="pct" id="bar-doctor-pct">0%</span></div>
+          <div class="bar-track"><div class="bar-value orange" id="bar-doctor" style="width:0%"></div></div>
+        </div>
+      </div>
+
+      <!-- Queue Lengths Chart -->
+      <div class="card">
+        <h3><span class="icon">📈</span> Queue Lengths Over Time</h3>
+        <div class="chart-box"><canvas id="chartQueues"></canvas></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <!-- Bed Occupancy Chart -->
+      <div class="card">
+        <h3><span class="icon">🛏️</span> Bed Occupancy Over Time</h3>
+        <div class="chart-box"><canvas id="chartBeds"></canvas></div>
+      </div>
+      <!-- Throughput Chart -->
+      <div class="card">
+        <h3><span class="icon">📈</span> Cumulative Throughput</h3>
+        <div class="chart-box"><canvas id="chartThroughput"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ TAB 2: RESULTS ═══════ -->
+<div id="tab-results" class="tab-content">
+  <div id="noResults" class="card" style="text-align:center;padding:3rem">
+    <div style="font-size:3rem;margin-bottom:1rem">📊</div>
+    <div style="color:var(--text2)">Run a simulation to see results here.</div>
+  </div>
+  <div id="resultsContent" class="hidden">
+    <!-- KPI Summary -->
+    <h3 style="margin-bottom:1rem;font-size:1.1rem">📌 Key Performance Indicators (across all replications)</h3>
+    <div class="kpi-grid" id="summaryKpis" style="margin-bottom:1.5rem"></div>
+
+    <!-- Summary Cards -->
+    <div class="grid-2" style="margin-bottom:1.5rem">
+      <div class="card">
+        <h3><span class="icon">🏥</span> Resource Utilization Summary</h3>
+        <div id="resourceSummary"></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon">⏳</span> Queue Statistics Summary</h3>
+        <div id="queueSummary"></div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid-2" style="margin-bottom:1.5rem">
+      <div class="card">
+        <h3><span class="icon">📊</span> Replication Throughput</h3>
+        <div class="chart-box"><canvas id="chartRepThroughput"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon">📊</span> Avg Length of Stay by Replication</h3>
+        <div class="chart-box"><canvas id="chartRepLOS"></canvas></div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-bottom:1.5rem">
+      <div class="card">
+        <h3><span class="icon">📊</span> Resource Utilization Comparison</h3>
+        <div class="chart-box"><canvas id="chartUtilBar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3><span class="icon">📊</span> Queue Wait Times</h3>
+        <div class="chart-box"><canvas id="chartQueueWaits"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ TAB 3: DETAILS ═══════ -->
+<div id="tab-details" class="tab-content">
+  <div id="noDetails" class="card" style="text-align:center;padding:3rem">
+    <div style="font-size:3rem;margin-bottom:1rem">📋</div>
+    <div style="color:var(--text2)">Run a simulation to see detailed tables here.</div>
+  </div>
+  <div id="detailsContent" class="hidden">
+    <div class="card" style="margin-bottom:1.5rem">
+      <h3><span class="icon">📋</span> Individual Replication Results</h3>
+      <div class="table-wrap" id="repTableWrap"></div>
+    </div>
+    <div class="card">
+      <h3><span class="icon">📊</span> Summary Statistics with 95% Confidence Intervals</h3>
+      <div class="table-wrap" id="summaryTableWrap"></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   CLIENT-SIDE LOGIC
+   ════════════════════════════════════════════════════════════════ */
+const socket = io();
+let charts = {};
+let liveTS = { times:[], bedOcc:[], qTriage:[], qReg:[], qBed:[], qDoctor:[], arrivals:[], discharged:[] };
+
+// ── Tab switching ──
+function switchTab(id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${id}"]`).classList.add('active');
+  document.getElementById('tab-' + id).classList.add('active');
+}
+
+// ── Start / Stop ──
+function startSim() {
+  const params = {};
+  ['sim_duration','warmup_period','num_replications','mean_interarrival',
+   'num_triage_nurses','num_admin_staff','num_er_beds','num_doctors','num_nurses'
+  ].forEach(k => { params[k] = document.getElementById(k).value; });
+  resetLive();
+  socket.emit('start_simulation', params);
+}
+function stopSim() { socket.emit('stop_simulation'); }
+
+function resetLive() {
+  liveTS = { times:[], bedOcc:[], qTriage:[], qReg:[], qBed:[], qDoctor:[], arrivals:[], discharged:[] };
+  Object.values(charts).forEach(c => { if(c && c.destroy) c.destroy(); });
+  charts = {};
+}
+
+function setStatus(state, text) {
+  const badge = document.getElementById('statusBadge');
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  badge.className = 'status-badge ' + state;
+  dot.className = 'status-dot ' + state;
+  txt.textContent = text;
+}
+
+// ── Socket Events ──
+socket.on('sim_started', (d) => {
+  setStatus('running', `Running (0/${d.num_reps})`);
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').classList.remove('hidden');
+  document.getElementById('progressSection').classList.remove('hidden');
+  document.getElementById('liveDashboard').classList.remove('hidden');
+  initLiveCharts();
+});
+
+socket.on('live_rep_start', (d) => {
+  setStatus('running', `Rep ${d.rep} (Live)`);
+});
+
+socket.on('live_snapshot', (d) => {
+  // KPIs
+  document.getElementById('kpi-time').textContent = d.sim_hours;
+  document.getElementById('kpi-arrivals').textContent = d.arrivals;
+  document.getElementById('kpi-discharged').textContent = d.discharged;
+  document.getElementById('kpi-insystem').textContent = d.in_system;
+  document.getElementById('kpi-beds').textContent = `${d.beds_used}/${d.beds_total}`;
+  document.getElementById('kpi-bedocc').textContent = d.bed_occ + '%';
+
+  // Flow animation
+  const stages = ['triage','reg','bed','doctor'];
+  stages.forEach(s => {
+    const qs = document.getElementById('fc-' + s);
+    const qv = d['q_' + (s === 'reg' ? 'reg' : s)];
+    if(qs) qs.textContent = 'Q: ' + qv;
+    const icon = document.getElementById('fs-' + s);
+    if(icon) { if(qv > 0) icon.classList.add('active'); else icon.classList.remove('active'); }
+  });
+  document.getElementById('fc-entrance').textContent = d.arrivals;
+  document.getElementById('fc-exit').textContent = d.discharged;
+
+  // Arrows
+  ['fa1','fa2','fa3','fa4','fa5','fa6'].forEach(a => {
+    document.getElementById(a).classList.toggle('active', d.arrivals > 0);
+  });
+
+  // Resource bars (values are already percentages from backend)
+  setBar('triage', d.triage_busy);
+  setBar('admin', d.admin_busy);
+  setBar('beds', d.bed_occ);
+  setBar('doctor', d.doctor_busy);
+
+  // Live charts data
+  liveTS.times.push(d.sim_time);
+  liveTS.bedOcc.push(d.bed_occ);
+  liveTS.qTriage.push(d.q_triage);
+  liveTS.qReg.push(d.q_reg);
+  liveTS.qBed.push(d.q_bed);
+  liveTS.qDoctor.push(d.q_doctor);
+  liveTS.arrivals.push(d.arrivals);
+  liveTS.discharged.push(d.discharged);
+
+  updateLiveCharts();
+});
+
+socket.on('rep_complete', (d) => {
+  const pct = d.progress;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = `Replication ${d.rep}/${d.total}`;
+  document.getElementById('progressPct').textContent = pct + '%';
+  setStatus('running', `Running (${d.rep}/${d.total})`);
+
+  // If first rep has ts_data, update charts with final data
+  if (d.ts_data && d.ts_data.length > 0) {
+    liveTS.times = d.ts_data.map(p => p.time);
+    liveTS.bedOcc = d.ts_data.map(p => p.bed_occ);
+    liveTS.qTriage = d.ts_data.map(p => p.q_triage);
+    liveTS.qReg = d.ts_data.map(p => p.q_reg);
+    liveTS.qBed = d.ts_data.map(p => p.q_bed);
+    liveTS.qDoctor = d.ts_data.map(p => p.q_doctor);
+    liveTS.arrivals = d.ts_data.map(p => p.arrivals);
+    liveTS.discharged = d.ts_data.map(p => p.discharged);
+    updateLiveCharts();
+  }
+});
+
+socket.on('sim_complete', (d) => {
+  setStatus('complete', 'Complete');
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').classList.add('hidden');
+  buildResults(d);
+});
+
+socket.on('sim_stopped', () => {
+  setStatus('idle', 'Stopped');
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').classList.add('hidden');
+});
+
+socket.on('error', (d) => { alert(d.msg); });
+
+// ── Utility Functions ──
+function setBar(name, pct) {
+  pct = Math.min(100, Math.max(0, pct));
+  document.getElementById('bar-' + name).style.width = pct + '%';
+  document.getElementById('bar-' + name + '-pct').textContent = Math.round(pct) + '%';
+}
+
+// ── Live Charts ──
+function initLiveCharts() {
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false,
+    animation: { duration: 0 },
+    plugins: { legend: { labels: { color:'#94a3b8', font:{size:11} } } },
+    scales: {
+      x: { ticks:{color:'#64748b',maxTicksLimit:8}, grid:{color:'rgba(71,85,105,.3)'}, title:{display:true,text:'Sim Time (min)',color:'#64748b'} },
+      y: { ticks:{color:'#64748b'}, grid:{color:'rgba(71,85,105,.3)'} }
+    }
+  };
+
+  charts.queues = new Chart(document.getElementById('chartQueues'), {
+    type:'line', data:{
+      labels:[], datasets:[
+        {label:'Triage',data:[],borderColor:'#a855f7',borderWidth:1.5,pointRadius:0,tension:.3},
+        {label:'Registration',data:[],borderColor:'#06b6d4',borderWidth:1.5,pointRadius:0,tension:.3},
+        {label:'Bed',data:[],borderColor:'#f59e0b',borderWidth:1.5,pointRadius:0,tension:.3},
+        {label:'Doctor',data:[],borderColor:'#22c55e',borderWidth:1.5,pointRadius:0,tension:.3},
+      ]
+    }, options:{...chartOpts, scales:{...chartOpts.scales,y:{...chartOpts.scales.y,title:{display:true,text:'Queue Length',color:'#64748b'}}}}
+  });
+
+  charts.beds = new Chart(document.getElementById('chartBeds'), {
+    type:'line', data:{
+      labels:[], datasets:[
+        {label:'Bed Occupancy %',data:[],borderColor:'#3b82f6',backgroundColor:'rgba(59,130,246,.1)',fill:true,borderWidth:2,pointRadius:0,tension:.3}
+      ]
+    }, options:{...chartOpts, scales:{...chartOpts.scales,y:{...chartOpts.scales.y,min:0,max:100,title:{display:true,text:'Occupancy %',color:'#64748b'}}}}
+  });
+
+  charts.throughput = new Chart(document.getElementById('chartThroughput'), {
+    type:'line', data:{
+      labels:[], datasets:[
+        {label:'Arrivals',data:[],borderColor:'#22c55e',borderWidth:2,pointRadius:0,tension:.3},
+        {label:'Discharged',data:[],borderColor:'#a855f7',borderWidth:2,pointRadius:0,tension:.3},
+      ]
+    }, options:{...chartOpts, scales:{...chartOpts.scales,y:{...chartOpts.scales.y,title:{display:true,text:'Count',color:'#64748b'}}}}
+  });
+}
+
+function updateLiveCharts() {
+  if (!charts.queues) return;
+  // Downsample for performance
+  const maxPts = 200;
+  const step = Math.max(1, Math.floor(liveTS.times.length / maxPts));
+  const t = liveTS.times.filter((_,i) => i%step===0);
+  const fmt = t.map(v => {
+    const h = Math.floor(v/60); const m = Math.floor(v%60);
+    return `${h}:${String(m).padStart(2,'0')}`;
+  });
+
+  charts.queues.data.labels = fmt;
+  charts.queues.data.datasets[0].data = liveTS.qTriage.filter((_,i)=>i%step===0);
+  charts.queues.data.datasets[1].data = liveTS.qReg.filter((_,i)=>i%step===0);
+  charts.queues.data.datasets[2].data = liveTS.qBed.filter((_,i)=>i%step===0);
+  charts.queues.data.datasets[3].data = liveTS.qDoctor.filter((_,i)=>i%step===0);
+  charts.queues.update('none');
+
+  charts.beds.data.labels = fmt;
+  charts.beds.data.datasets[0].data = liveTS.bedOcc.filter((_,i)=>i%step===0);
+  charts.beds.update('none');
+
+  charts.throughput.data.labels = fmt;
+  charts.throughput.data.datasets[0].data = liveTS.arrivals.filter((_,i)=>i%step===0);
+  charts.throughput.data.datasets[1].data = liveTS.discharged.filter((_,i)=>i%step===0);
+  charts.throughput.update('none');
+}
+
+// ══════════════════════════════════════════════════════════════
+// BUILD RESULTS
+// ══════════════════════════════════════════════════════════════
+function buildResults(data) {
+  const s = data.summary;
+  const reps = data.all_reps;
+
+  // Show results tab content
+  document.getElementById('noResults').classList.add('hidden');
+  document.getElementById('resultsContent').classList.remove('hidden');
+  document.getElementById('noDetails').classList.add('hidden');
+  document.getElementById('detailsContent').classList.remove('hidden');
+
+  // KPI cards
+  const kpis = [
+    {label:'Avg Wait for Doctor',key:'avg_wait_doctor',unit:'min',cls:'orange',fmt:v=>`${v.toFixed(1)} min`},
+    {label:'Avg Length of Stay',key:'avg_los',unit:'min',cls:'orange',fmt:v=>`${(v/60).toFixed(1)} hrs`},
+    {label:'Bed Occupancy',key:'bed_occ',unit:'%',cls:'green',fmt:v=>v.toFixed(1)+'%'},
+    {label:'Doctor Utilization',key:'doctor_util',unit:'%',cls:'purple',fmt:v=>v.toFixed(1)+'%'},
+    {label:'Triage Nurse Util',key:'triage_util',unit:'%',cls:'purple',fmt:v=>v.toFixed(1)+'%'},
+    {label:'Admin Staff Util',key:'admin_util',unit:'%',cls:'',fmt:v=>v.toFixed(1)+'%'},
+    {label:'Daily Throughput',key:'throughput',unit:'pts',cls:'green',fmt:v=>v.toFixed(0)},
+  ];
+  const kpiHtml = kpis.map(k => {
+    const d = s[k.key];
+    return `<div class="kpi ${k.cls}"><div class="value">${k.fmt(d.mean)}</div><div class="label">${k.label}</div><div style="font-size:.65rem;color:var(--text2);margin-top:.2rem">95% CI [${d.lo}, ${d.hi}]</div></div>`;
+  }).join('');
+  document.getElementById('summaryKpis').innerHTML = kpiHtml;
+
+  // Resource utilization summary
+  const resources = [
+    {name:'Triage Nurse',key:'triage_util',icon:'🩺'},
+    {name:'Admin Staff',key:'admin_util',icon:'📋'},
+    {name:'ER Beds',key:'bed_occ',icon:'🛏️'},
+    {name:'Doctors',key:'doctor_util',icon:'👨‍⚕️'},
+  ];
+  document.getElementById('resourceSummary').innerHTML = resources.map(r => {
+    const d = s[r.key];
+    return `<div class="summary-metric"><span class="metric-name">${r.icon} ${r.name}</span><span><span class="metric-val">${d.mean.toFixed(1)}%</span><span class="metric-ci">±${(d.hi-d.lo).toFixed(1)}%</span></span></div>`;
+  }).join('');
+
+  // Queue summary
+  const queues = [
+    {name:'Triage',waitKey:'avg_triage_wait',maxKey:'max_triage_q'},
+    {name:'Registration',waitKey:'avg_reg_wait',maxKey:'max_reg_q'},
+    {name:'Bed Assignment',waitKey:'avg_bed_wait',maxKey:'max_bed_q'},
+    {name:'Doctor',waitKey:'avg_doctor_wait',maxKey:'max_doctor_q'},
+  ];
+  document.getElementById('queueSummary').innerHTML = queues.map(q => {
+    const w = s[q.waitKey];
+    const m = s[q.maxKey];
+    return `<div class="summary-metric"><span class="metric-name">${q.name}</span><span><span class="metric-val">${w.mean.toFixed(1)} min</span><span class="metric-ci">Max Q: ${m.mean.toFixed(0)}</span></span></div>`;
+  }).join('');
+
+  // Build charts
+  buildResultCharts(reps, s);
+
+  // Build tables
+  buildRepTable(reps);
+  buildSummaryTable(s);
+}
+
+function buildResultCharts(reps, summary) {
+  const labels = reps.map(r => r.rep);
+  const colors = {blue:'#3b82f6',green:'#22c55e',orange:'#f59e0b',purple:'#a855f7',cyan:'#06b6d4',pink:'#ec4899'};
+  const chartBase = {
+    responsive:true, maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}}},
+    scales:{
+      x:{ticks:{color:'#64748b'},grid:{color:'rgba(71,85,105,.3)'},title:{display:true,text:'Replication',color:'#64748b'}},
+      y:{ticks:{color:'#64748b'},grid:{color:'rgba(71,85,105,.3)'}}
+    }
+  };
+
+  // Destroy previous if exist
+  ['chartRepThroughput','chartRepLOS','chartUtilBar','chartQueueWaits'].forEach(id => {
+    if(charts[id]) charts[id].destroy();
+  });
+
+  charts.chartRepThroughput = new Chart(document.getElementById('chartRepThroughput'), {
+    type:'bar', data:{labels, datasets:[{label:'Throughput',data:reps.map(r=>r.throughput),backgroundColor:colors.blue+'99',borderColor:colors.blue,borderWidth:1}]},
+    options:{...chartBase,scales:{...chartBase.scales,y:{...chartBase.scales.y,title:{display:true,text:'Patients',color:'#64748b'}}}}
+  });
+
+  charts.chartRepLOS = new Chart(document.getElementById('chartRepLOS'), {
+    type:'bar', data:{labels, datasets:[{label:'Avg LOS (min)',data:reps.map(r=>r.avg_los),backgroundColor:colors.orange+'99',borderColor:colors.orange,borderWidth:1}]},
+    options:{...chartBase,scales:{...chartBase.scales,y:{...chartBase.scales.y,title:{display:true,text:'Minutes',color:'#64748b'}}}}
+  });
+
+  const utilLabels = ['Triage Nurse','Admin Staff','ER Beds','Doctors'];
+  const utilKeys = ['triage_util','admin_util','bed_occ','doctor_util'];
+  const utilColors = [colors.purple, colors.cyan, colors.green, colors.orange];
+  charts.chartUtilBar = new Chart(document.getElementById('chartUtilBar'), {
+    type:'bar', data:{
+      labels:utilLabels,
+      datasets:[{label:'Mean Utilization %',data:utilKeys.map(k=>summary[k].mean),backgroundColor:utilColors.map(c=>c+'99'),borderColor:utilColors,borderWidth:1}]
+    }, options:{...chartBase,scales:{...chartBase.scales,y:{...chartBase.scales.y,min:0,max:100,title:{display:true,text:'%',color:'#64748b'}}},plugins:{...chartBase.plugins,legend:{display:false}}}
+  });
+
+  const waitLabels = ['Triage','Registration','Bed','Doctor'];
+  const waitKeys = ['avg_triage_wait','avg_reg_wait','avg_bed_wait','avg_doctor_wait'];
+  const waitColors = [colors.purple, colors.cyan, colors.orange, colors.green];
+  charts.chartQueueWaits = new Chart(document.getElementById('chartQueueWaits'), {
+    type:'bar', data:{
+      labels:waitLabels,
+      datasets:[{label:'Avg Wait (min)',data:waitKeys.map(k=>summary[k].mean),backgroundColor:waitColors.map(c=>c+'99'),borderColor:waitColors,borderWidth:1}]
+    }, options:{...chartBase,scales:{...chartBase.scales,y:{...chartBase.scales.y,title:{display:true,text:'Minutes',color:'#64748b'}}},plugins:{...chartBase.plugins,legend:{display:false}}}
+  });
+}
+
+function buildRepTable(reps) {
+  const cols = [
+    {key:'rep',label:'Rep'},
+    {key:'throughput',label:'Throughput'},
+    {key:'total_arrivals',label:'Arrivals'},
+    {key:'avg_wait_doctor',label:'Avg Wait Doctor (min)'},
+    {key:'avg_los',label:'Avg LOS (min)'},
+    {key:'bed_occ',label:'Bed Occ (%)'},
+    {key:'doctor_util',label:'Doctor Util (%)'},
+    {key:'triage_util',label:'Triage Util (%)'},
+    {key:'admin_util',label:'Admin Util (%)'},
+    {key:'avg_triage_wait',label:'Triage Q Wait'},
+    {key:'avg_bed_wait',label:'Bed Q Wait'},
+    {key:'avg_doctor_wait',label:'Doctor Q Wait'},
+    {key:'max_triage_q',label:'Max Triage Q'},
+    {key:'max_bed_q',label:'Max Bed Q'},
+    {key:'max_doctor_q',label:'Max Doctor Q'},
+  ];
+  let html = '<table><thead><tr>' + cols.map(c=>`<th>${c.label}</th>`).join('') + '</tr></thead><tbody>';
+  reps.forEach(r => {
+    html += '<tr>' + cols.map(c => {
+      const v = r[c.key];
+      return `<td>${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v}</td>`;
+    }).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  document.getElementById('repTableWrap').innerHTML = html;
+}
+
+function buildSummaryTable(summary) {
+  const metrics = [
+    {key:'throughput',label:'Throughput'},
+    {key:'total_arrivals',label:'Total Arrivals'},
+    {key:'avg_wait_doctor',label:'Avg Wait for Doctor (min)'},
+    {key:'avg_los',label:'Avg Length of Stay (min)'},
+    {key:'bed_occ',label:'Bed Occupancy (%)'},
+    {key:'doctor_util',label:'Doctor Utilization (%)'},
+    {key:'triage_util',label:'Triage Nurse Util (%)'},
+    {key:'admin_util',label:'Admin Staff Util (%)'},
+    {key:'avg_triage_wait',label:'Avg Triage Queue Wait'},
+    {key:'avg_reg_wait',label:'Avg Registration Queue Wait'},
+    {key:'avg_bed_wait',label:'Avg Bed Queue Wait'},
+    {key:'avg_doctor_wait',label:'Avg Doctor Queue Wait'},
+    {key:'max_triage_q',label:'Max Triage Queue'},
+    {key:'max_reg_q',label:'Max Registration Queue'},
+    {key:'max_bed_q',label:'Max Bed Queue'},
+    {key:'max_doctor_q',label:'Max Doctor Queue'},
+  ];
+  let html = '<table><thead><tr><th style="text-align:left">Metric</th><th>Mean</th><th>Std Dev</th><th>Min</th><th>Max</th><th>95% CI Low</th><th>95% CI High</th></tr></thead><tbody>';
+  metrics.forEach(m => {
+    const d = summary[m.key];
+    if (!d) return;
+    html += `<tr><td>${m.label}</td><td>${d.mean}</td><td>${d.std}</td><td>${d.min}</td><td>${d.max}</td><td>${d.lo}</td><td>${d.hi}</td></tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('summaryTableWrap').innerHTML = html;
+}
+</script>
+</body>
+</html>
