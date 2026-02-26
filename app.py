@@ -109,6 +109,29 @@ class ERSimulation:
         self.bed_samples = []
         self.max_q = {"triage": 0, "registration": 0, "bed": 0, "doctor": 0}
 
+        # Patient location tracking (live counts)
+        self.patients_at = {
+            "triage": 0,
+            "triage_queue": 0,
+            "registration": 0,
+            "registration_queue": 0,
+            "bed_queue": 0,
+            "in_bed": 0,
+            "doctor": 0,
+            "doctor_queue": 0,
+            "treatment": 0,
+            "discharge": 0,
+        }
+
+        # ── Arena-style entity tracking ──
+        self.available_beds = list(range(1, params["num_er_beds"] + 1))
+        self.patient_entities = {}   # pid -> {station, status, bed}
+        self.staff_entities = {}     # staff_id -> {type, status, bed}
+        for i in range(params["num_doctors"]):
+            self.staff_entities[f"d{i}"] = {"type": "doctor", "status": "idle", "bed": None}
+        for i in range(params["num_nurses"]):
+            self.staff_entities[f"n{i}"] = {"type": "nurse", "status": "idle", "bed": None}
+
         # For live event log
         self.event_log = []
         self.last_emit_time = -1
@@ -136,6 +159,39 @@ class ERSimulation:
                 "station": station,
             })
 
+    # ── Entity helpers ──
+    def _take_bed(self):
+        return self.available_beds.pop(0) if self.available_beds else 1
+
+    def _free_bed(self, b):
+        if b is not None:
+            self.available_beds.append(b)
+            self.available_beds.sort()
+
+    def _take_staff(self, stype, bed):
+        prefix = "d" if stype == "doctor" else "n"
+        for sid, info in self.staff_entities.items():
+            if sid.startswith(prefix) and info["status"] == "idle":
+                info["status"] = "busy"
+                info["bed"] = bed
+                return sid
+        return None
+
+    def _free_staff(self, sid):
+        if sid and sid in self.staff_entities:
+            self.staff_entities[sid]["status"] = "idle"
+            self.staff_entities[sid]["bed"] = None
+
+    def _entities_snapshot(self):
+        ents = []
+        for pid, info in self.patient_entities.items():
+            ents.append({"id": f"p{pid}", "tp": "P", "st": info["station"],
+                         "ss": info["status"], "bed": info.get("bed")})
+        for sid, info in self.staff_entities.items():
+            ents.append({"id": sid, "tp": "D" if info["type"] == "doctor" else "N",
+                         "ss": info["status"], "bed": info.get("bed")})
+        return ents
+
     def patient_process(self, pid):
         global sim_running
         if not sim_running:
@@ -148,87 +204,138 @@ class ERSimulation:
             self.arrivals += 1
             self._log_event(pid, "arrived", "entrance")
 
+        # Entity tracking — add patient
+        self.patient_entities[pid] = {"station": "entrance", "status": "arriving", "bed": None}
+
         # 1. TRIAGE
         rec.triage_wait_start = self.env.now
+        self.patients_at["triage_queue"] += 1
+        self.patient_entities[pid]["station"] = "triage_queue"
+        self.patient_entities[pid]["status"] = "triage_queue"
         with self.triage_nurse.request() as req:
             if self._in_window():
                 q = len(self.triage_nurse.queue)
                 self.max_q["triage"] = max(self.max_q["triage"], q)
             yield req
+            self.patients_at["triage_queue"] -= 1
+            self.patients_at["triage"] += 1
+            self.patient_entities[pid]["station"] = "triage"
+            self.patient_entities[pid]["status"] = "triage"
             rec.triage_start = self.env.now
             self._log_event(pid, "start", "triage")
             svc = triage_time(self.rng)
             yield self.env.timeout(svc)
             rec.triage_end = self.env.now
             self.triage_busy += self._clamp(rec.triage_start, rec.triage_end)
+            self.patients_at["triage"] -= 1
             self._log_event(pid, "done", "triage")
 
         # 2. REGISTRATION
         rec.reg_wait_start = self.env.now
+        self.patients_at["registration_queue"] += 1
+        self.patient_entities[pid]["station"] = "reg_queue"
+        self.patient_entities[pid]["status"] = "reg_queue"
         with self.admin_staff.request() as req:
             if self._in_window():
                 q = len(self.admin_staff.queue)
                 self.max_q["registration"] = max(self.max_q["registration"], q)
             yield req
+            self.patients_at["registration_queue"] -= 1
+            self.patients_at["registration"] += 1
+            self.patient_entities[pid]["station"] = "registration"
+            self.patient_entities[pid]["status"] = "registration"
             rec.reg_start = self.env.now
             self._log_event(pid, "start", "registration")
             svc = registration_time(self.rng)
             yield self.env.timeout(svc)
             rec.reg_end = self.env.now
             self.admin_busy += self._clamp(rec.reg_start, rec.reg_end)
+            self.patients_at["registration"] -= 1
             self._log_event(pid, "done", "registration")
 
         # 3. BED ASSIGNMENT
         rec.bed_wait_start = self.env.now
+        self.patients_at["bed_queue"] += 1
+        self.patient_entities[pid]["station"] = "bed_queue"
+        self.patient_entities[pid]["status"] = "bed_queue"
         bed_req = self.er_bed.request()
         if self._in_window():
             q = len(self.er_bed.queue)
             self.max_q["bed"] = max(self.max_q["bed"], q)
         yield bed_req
+        self.patients_at["bed_queue"] -= 1
+        self.patients_at["in_bed"] += 1
+        bed_num = self._take_bed()
+        self.patient_entities[pid]["station"] = f"bed_{bed_num}"
+        self.patient_entities[pid]["status"] = "in_bed"
+        self.patient_entities[pid]["bed"] = bed_num
         rec.bed_assigned = self.env.now
         self._log_event(pid, "assigned", "bed")
         yield self.env.timeout(0.01)
 
         # 4. DOCTOR EVAL
         rec.doctor_wait_start = self.env.now
+        self.patients_at["doctor_queue"] += 1
+        self.patient_entities[pid]["status"] = "waiting_doctor"
         with self.doctor.request() as req:
             if self._in_window():
                 q = len(self.doctor.queue)
                 self.max_q["doctor"] = max(self.max_q["doctor"], q)
             yield req
+            self.patients_at["doctor_queue"] -= 1
+            self.patients_at["doctor"] += 1
+            doc_id = self._take_staff("doctor", bed_num)
+            self.patient_entities[pid]["status"] = "with_doctor"
             rec.doctor_start = self.env.now
             self._log_event(pid, "start", "doctor")
             svc = doctor_eval_time(self.rng)
             yield self.env.timeout(svc)
             rec.doctor_end = self.env.now
             self.doctor_busy += self._clamp(rec.doctor_start, rec.doctor_end)
+            self._free_staff(doc_id)
+            self.patients_at["doctor"] -= 1
             self._log_event(pid, "done", "doctor")
 
         # 5. TREATMENT
         rec.treatment_start = self.env.now
+        self.patients_at["treatment"] += 1
+        nurse_id = self._take_staff("nurse", bed_num)
+        self.patient_entities[pid]["status"] = "treatment"
         self._log_event(pid, "start", "treatment")
         svc = treatment_observation_time(self.rng)
         yield self.env.timeout(svc)
         rec.treatment_end = self.env.now
+        self._free_staff(nurse_id)
+        self.patients_at["treatment"] -= 1
         self._log_event(pid, "done", "treatment")
 
         # 6. DISCHARGE
         rec.discharge_start = self.env.now
+        self.patients_at["discharge"] += 1
+        self.patient_entities[pid]["status"] = "discharge"
         self._log_event(pid, "start", "discharge")
         svc = discharge_time(self.rng)
         yield self.env.timeout(svc)
         rec.discharge_end = self.env.now
+        self.patients_at["discharge"] -= 1
         self._log_event(pid, "done", "discharge")
 
         # 7. RELEASE BED
+        self.patients_at["in_bed"] -= 1
+        self._free_bed(bed_num)
         self.er_bed.release(bed_req)
 
         # 8. EXIT
+        self.patient_entities[pid]["station"] = "exit"
+        self.patient_entities[pid]["status"] = "exiting"
         rec.exit_time = self.env.now
         if rec.exit_time >= self.wp and rec.exit_time <= self.total_time:
             self.records.append(rec)
             self.discharged += 1
             self._log_event(pid, "exited", "exit")
+
+        # Remove from entity tracker
+        self.patient_entities.pop(pid, None)
 
     def patient_generator(self):
         global sim_running
@@ -296,6 +403,8 @@ class ERSimulation:
                     "triage_busy": round(self.triage_busy / (max(0.001, elapsed) * self.p["num_triage_nurses"]) * 100, 1),
                     "admin_busy": round(self.admin_busy / (max(0.001, elapsed) * self.p["num_admin_staff"]) * 100, 1),
                     "doctor_busy": round(self.doctor_busy / (max(0.001, elapsed) * self.p["num_doctors"]) * 100, 1),
+                    "patients_at": dict(self.patients_at),
+                    "entities": self._entities_snapshot(),
                 }
                 self.sio.emit("live_snapshot", snapshot)
                 self.sio.sleep(0)

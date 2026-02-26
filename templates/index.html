@@ -147,6 +147,49 @@ tr:hover td{background:rgba(59,130,246,.05)}
 
 .hidden{display:none !important}
 
+/* ── FLOOR PLAN ── */
+.floorplan-wrap{position:relative;width:100%;max-width:800px;margin:0 auto;aspect-ratio:800/600;background:#0f172a;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)}
+.floorplan-wrap img{width:100%;height:100%;display:block;opacity:.7}
+.floorplan-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.fp-marker{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:auto;transition:all .4s ease}
+.fp-bubble{border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:14px;border:2px solid rgba(255,255,255,.3);box-shadow:0 0 12px rgba(0,0,0,.5);transition:all .4s ease;min-width:32px;min-height:32px}
+.fp-bubble.pulse{animation:fp-pulse 1.5s infinite}
+@keyframes fp-pulse{0%,100%{box-shadow:0 0 8px rgba(255,255,255,.2)}50%{box-shadow:0 0 20px rgba(255,255,255,.5)}}
+.fp-label{font-size:9px;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.8);font-weight:600}
+.fp-count-label{font-size:11px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.8);white-space:nowrap}
+
+/* ── ENTITY ICONS (Arena-style) ── */
+.entity-layer{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5}
+.ent{position:absolute;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;
+  font-weight:800;color:#fff;font-size:9px;border:2px solid rgba(255,255,255,.5);
+  box-shadow:0 0 6px rgba(0,0,0,.6);pointer-events:auto;cursor:default;
+  transition:left .8s cubic-bezier(.4,0,.2,1),top .8s cubic-bezier(.4,0,.2,1),background-color .4s,opacity .5s,box-shadow .4s;
+  z-index:6;text-shadow:0 1px 2px rgba(0,0,0,.6);opacity:1}
+.ent-P{width:18px;height:18px;border-radius:50%}
+.ent-D{width:24px;height:24px;border-radius:5px}
+.ent-N{width:22px;height:22px;border-radius:50% 50% 50% 0}
+.ent.glow{box-shadow:0 0 10px 3px currentColor}
+.ent.removing{opacity:0;transform:translate(-50%,-50%) scale(.3)}
+
+/* ── LEGEND ── */
+.fp-legend{display:flex;flex-wrap:wrap;gap:.6rem;margin-top:.8rem;justify-content:center}
+.fp-legend-item{display:flex;align-items:center;gap:.3rem;font-size:.7rem;color:var(--text2)}
+.fp-legend-swatch{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.3)}
+.fp-legend-swatch.sq{border-radius:4px}
+.fp-legend-swatch.dia{border-radius:50% 50% 50% 0}
+
+.fp-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.8rem;margin-top:1.2rem}
+.fp-stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;text-align:center;position:relative;overflow:hidden}
+.fp-stat::before{content:'';position:absolute;top:0;left:0;width:100%;height:3px}
+.fp-stat.purple::before{background:var(--purple)}
+.fp-stat.cyan::before{background:var(--cyan)}
+.fp-stat.orange::before{background:var(--orange)}
+.fp-stat.red::before{background:var(--red)}
+.fp-stat.green::before{background:var(--green)}
+.fp-stat.pink::before{background:var(--pink)}
+.fp-stat .fp-stat-val{font-size:1.8rem;font-weight:800}
+.fp-stat .fp-stat-lbl{font-size:.7rem;color:var(--text2);text-transform:uppercase;letter-spacing:.05em;margin-top:.2rem}
+
 /* ── SCROLLBAR ── */
 ::-webkit-scrollbar{width:8px}
 ::-webkit-scrollbar-track{background:var(--bg)}
@@ -170,6 +213,7 @@ tr:hover td{background:rgba(59,130,246,.05)}
 <!-- TABS -->
 <div class="tabs">
   <div class="tab active" data-tab="sim" onclick="switchTab('sim')">⚡ Simulation</div>
+  <div class="tab" data-tab="floorplan" onclick="switchTab('floorplan')">🏥 Floor Plan</div>
   <div class="tab" data-tab="results" onclick="switchTab('results')">📊 Results</div>
   <div class="tab" data-tab="details" onclick="switchTab('details')">📋 Details</div>
 </div>
@@ -336,7 +380,106 @@ tr:hover td{background:rgba(59,130,246,.05)}
   </div>
 </div>
 
-<!-- ═══════ TAB 2: RESULTS ═══════ -->
+<!-- ═══════ TAB 2: FLOOR PLAN ═══════ -->
+<div id="tab-floorplan" class="tab-content">
+  <div class="card" style="margin-bottom:1rem">
+    <h3><span class="icon">🏥</span> Live ER Floor Plan</h3>
+    <p style="color:var(--text2);font-size:.85rem;margin-bottom:1rem">Real-time patient locations across the Emergency Room. Circle size reflects patient count at each station.</p>
+
+    <div class="floorplan-wrap" id="floorplanWrap">
+      <img src="/static/er_floorplan.png" alt="ER Floor Plan" id="floorplanImg">
+      <div class="floorplan-overlay" id="floorplanOverlay">
+        <!-- Aggregate bubble markers -->
+        <div class="fp-marker" style="left:35%;top:16%" id="fp-triage_queue">
+          <div class="fp-bubble" style="background:rgba(168,85,247,.8);width:36px;height:36px">0</div>
+          <span class="fp-label">Triage Q</span>
+        </div>
+        <div class="fp-marker" style="left:50%;top:18%" id="fp-triage">
+          <div class="fp-bubble" style="background:rgba(168,85,247,.9);width:36px;height:36px">0</div>
+          <span class="fp-label">In Triage</span>
+        </div>
+        <div class="fp-marker" style="left:72%;top:15%" id="fp-registration_queue">
+          <div class="fp-bubble" style="background:rgba(6,182,212,.8);width:36px;height:36px">0</div>
+          <span class="fp-label">Reg Q</span>
+        </div>
+        <div class="fp-marker" style="left:85%;top:20%" id="fp-registration">
+          <div class="fp-bubble" style="background:rgba(6,182,212,.9);width:36px;height:36px">0</div>
+          <span class="fp-label">In Reg</span>
+        </div>
+        <div class="fp-marker" style="left:17%;top:25%" id="fp-bed_queue">
+          <div class="fp-bubble" style="background:rgba(249,115,22,.8);width:36px;height:36px">0</div>
+          <span class="fp-label">Bed Q</span>
+        </div>
+        <div class="fp-marker" style="left:12%;top:55%" id="fp-in_bed">
+          <div class="fp-bubble" style="background:rgba(220,38,38,.85);width:40px;height:40px">0</div>
+          <span class="fp-label">In Beds</span>
+        </div>
+        <div class="fp-marker" style="left:40%;top:48%" id="fp-doctor_queue">
+          <div class="fp-bubble" style="background:rgba(34,197,94,.8);width:36px;height:36px">0</div>
+          <span class="fp-label">Doc Q</span>
+        </div>
+        <div class="fp-marker" style="left:56%;top:52%" id="fp-doctor">
+          <div class="fp-bubble" style="background:rgba(34,197,94,.9);width:36px;height:36px">0</div>
+          <span class="fp-label">With Doc</span>
+        </div>
+        <div class="fp-marker" style="left:50%;top:73%" id="fp-treatment">
+          <div class="fp-bubble" style="background:rgba(236,72,153,.85);width:36px;height:36px">0</div>
+          <span class="fp-label">Treatment</span>
+        </div>
+        <div class="fp-marker" style="left:50%;top:90%" id="fp-discharge">
+          <div class="fp-bubble" style="background:rgba(34,197,94,.7);width:36px;height:36px">0</div>
+          <span class="fp-label">Discharge</span>
+        </div>
+      </div>
+      <!-- Entity animation layer (Arena-style icons) -->
+      <div class="entity-layer" id="entityLayer"></div>
+    </div>
+
+    <!-- Legend -->
+    <div class="fp-legend">
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#3b82f6"></div>Arriving</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#8b5cf6"></div>Triage</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#06b6d4"></div>Registration</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#f59e0b"></div>Waiting/Bed Q</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#ef4444"></div>In Bed</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#10b981"></div>With Doctor</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#ec4899"></div>Treatment</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch" style="background:#6b7280"></div>Discharge/Exit</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch sq" style="background:#10b981"></div>Doctor</div>
+      <div class="fp-legend-item"><div class="fp-legend-swatch dia" style="background:#06b6d4"></div>Nurse</div>
+    </div>
+
+    <!-- Live Stats Panel -->
+    <div class="fp-stats" id="fpStats">
+      <div class="fp-stat purple">
+        <div class="fp-stat-val" id="fpst-triage" style="color:var(--purple)">0</div>
+        <div class="fp-stat-lbl">🟣 Triage Queue</div>
+      </div>
+      <div class="fp-stat cyan">
+        <div class="fp-stat-val" id="fpst-reg" style="color:var(--cyan)">0</div>
+        <div class="fp-stat-lbl">📋 Reg Queue</div>
+      </div>
+      <div class="fp-stat red">
+        <div class="fp-stat-val" id="fpst-beds" style="color:var(--red)">0/10</div>
+        <div class="fp-stat-lbl">🛏️ Beds Occupied</div>
+      </div>
+      <div class="fp-stat green">
+        <div class="fp-stat-val" id="fpst-doctor" style="color:var(--green)">0</div>
+        <div class="fp-stat-lbl">👨‍⚕️ Doctor Queue</div>
+      </div>
+      <div class="fp-stat pink">
+        <div class="fp-stat-val" id="fpst-treatment" style="color:var(--pink)">0</div>
+        <div class="fp-stat-lbl">💊 In Treatment</div>
+      </div>
+      <div class="fp-stat orange">
+        <div class="fp-stat-val" id="fpst-total" style="color:var(--orange)">0</div>
+        <div class="fp-stat-lbl">📊 Total in ER</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ TAB 3: RESULTS ═══════ -->
 <div id="tab-results" class="tab-content">
   <div id="noResults" class="card" style="text-align:center;padding:3rem">
     <div style="font-size:3rem;margin-bottom:1rem">📊</div>
@@ -383,7 +526,7 @@ tr:hover td{background:rgba(59,130,246,.05)}
   </div>
 </div>
 
-<!-- ═══════ TAB 3: DETAILS ═══════ -->
+<!-- ═══════ TAB 4: DETAILS ═══════ -->
 <div id="tab-details" class="tab-content">
   <div id="noDetails" class="card" style="text-align:center;padding:3rem">
     <div style="font-size:3rem;margin-bottom:1rem">📋</div>
@@ -502,6 +645,9 @@ socket.on('live_snapshot', (d) => {
   liveTS.discharged.push(d.discharged);
 
   updateLiveCharts();
+
+  // Update Floor Plan
+  if (d.patients_at) updateFloorPlan(d);
 });
 
 socket.on('rep_complete', (d) => {
@@ -782,6 +928,203 @@ function buildSummaryTable(summary) {
   });
   html += '</tbody></table>';
   document.getElementById('summaryTableWrap').innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════════
+// FLOOR PLAN LIVE UPDATE (aggregate bubbles)
+// ══════════════════════════════════════════════════════════════
+function updateFloorPlan(d) {
+  const pa = d.patients_at;
+  const numBeds = parseInt(document.getElementById('num_er_beds').value) || 10;
+
+  const markers = [
+    'triage_queue', 'triage', 'registration_queue', 'registration',
+    'bed_queue', 'in_bed', 'doctor_queue', 'doctor', 'treatment', 'discharge'
+  ];
+
+  markers.forEach(key => {
+    const el = document.getElementById('fp-' + key);
+    if (!el) return;
+    const bubble = el.querySelector('.fp-bubble');
+    const count = pa[key] || 0;
+    bubble.textContent = count;
+    const sz = Math.min(80, Math.max(32, 32 + count * 6));
+    bubble.style.width = sz + 'px';
+    bubble.style.height = sz + 'px';
+    bubble.style.fontSize = (count > 9 ? 12 : 14) + 'px';
+    if (count > 0) bubble.classList.add('pulse'); else bubble.classList.remove('pulse');
+  });
+
+  // Stats panel
+  const triageQ = (pa.triage_queue || 0) + (pa.triage || 0);
+  const regQ = (pa.registration_queue || 0) + (pa.registration || 0);
+  const inBeds = pa.in_bed || 0;
+  const doctorQ = pa.doctor_queue || 0;
+  const treatment = pa.treatment || 0;
+  const total = Object.values(pa).reduce((a, b) => a + b, 0);
+
+  document.getElementById('fpst-triage').textContent = triageQ;
+  document.getElementById('fpst-reg').textContent = regQ;
+  document.getElementById('fpst-beds').textContent = inBeds + '/' + numBeds;
+  document.getElementById('fpst-doctor').textContent = doctorQ;
+  document.getElementById('fpst-treatment').textContent = treatment;
+  document.getElementById('fpst-total').textContent = total;
+
+  // ── Arena-style entity animation ──
+  if (d.entities) updateEntities(d.entities);
+}
+
+// ══════════════════════════════════════════════════════════════
+// ARENA-STYLE ENTITY ANIMATION
+// ══════════════════════════════════════════════════════════════
+
+// Station coordinates as percentages matching the floor plan image layout
+const STATION_XY = {
+  entrance:     [50, 5.5],
+  triage_queue: [38, 17],
+  triage:       [50, 18],
+  reg_queue:    [75, 16],
+  registration: [83, 22],
+  bed_queue:    [30, 30],
+  bed_1: [15, 37],  bed_2: [15, 48.5], bed_3: [15, 60], bed_4: [15, 72], bed_5: [15, 83.5],
+  bed_6: [85, 37],  bed_7: [85, 48.5], bed_8: [85, 60], bed_9: [85, 72], bed_10:[85, 83.5],
+  doctor_station: [50, 55],
+  nurse_station:  [50, 75],
+  discharge:    [50, 88],
+  exit:         [50, 95],
+};
+
+// Color by patient status
+const STATUS_COLORS = {
+  arriving: '#3b82f6',       // blue
+  triage_queue: '#8b5cf6',   // purple
+  triage: '#8b5cf6',         // purple
+  reg_queue: '#06b6d4',      // cyan
+  registration: '#06b6d4',   // cyan
+  bed_queue: '#f59e0b',      // orange
+  in_bed: '#ef4444',         // red
+  waiting_doctor: '#f59e0b', // orange
+  with_doctor: '#10b981',    // green
+  treatment: '#ec4899',      // pink
+  discharge: '#6b7280',      // gray
+  exiting: '#6b7280',        // gray
+};
+
+// Track entity index for jitter offset at same station
+const entityJitterSeed = {};
+function jitter(id, idx) {
+  // Deterministic small offset based on a simple hash of entity id
+  if (!(id in entityJitterSeed)) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+    entityJitterSeed[id] = (h % 100) / 100; // 0..1
+  }
+  const seed = entityJitterSeed[id];
+  return {
+    dx: (seed - 0.5) * 4,   // ±2% jitter
+    dy: ((seed * 7) % 1 - 0.5) * 3
+  };
+}
+
+function updateEntities(entities) {
+  const layer = document.getElementById('entityLayer');
+  if (!layer) return;
+  const activeIds = new Set();
+
+  // Group entities by station for stacking offset
+  const stationCounts = {};
+  entities.forEach(e => {
+    const sk = e.st || (e.bed ? 'bed_' + e.bed : (e.ss === 'idle' ? (e.tp === 'D' ? 'doctor_station' : 'nurse_station') : 'doctor_station'));
+    if (!stationCounts[sk]) stationCounts[sk] = 0;
+    e._stationKey = sk;
+    e._stationIdx = stationCounts[sk]++;
+  });
+
+  entities.forEach(e => {
+    const eid = 'ent-' + e.id;
+    activeIds.add(eid);
+
+    // Determine coordinates
+    let coords;
+    if (e.tp === 'P') {
+      // Patient: use station directly
+      coords = STATION_XY[e.st] || STATION_XY.entrance;
+    } else if (e.tp === 'D') {
+      // Doctor: at bed if busy, else at doctor station
+      coords = (e.ss === 'busy' && e.bed) ? STATION_XY['bed_' + e.bed] : STATION_XY.doctor_station;
+    } else {
+      // Nurse: at bed if busy, else at nurse station
+      coords = (e.ss === 'busy' && e.bed) ? STATION_XY['bed_' + e.bed] : STATION_XY.nurse_station;
+    }
+    if (!coords) coords = [50, 50];
+
+    // Add jitter for entities at same station
+    const j = jitter(e.id, e._stationIdx);
+    let cx = coords[0] + j.dx;
+    let cy = coords[1] + j.dy;
+
+    // Staff offset: doctor +3% right of bed, nurse +3% right +2% below
+    if (e.tp === 'D' && e.ss === 'busy' && e.bed) {
+      cx += 3;
+      cy -= 1.5;
+    } else if (e.tp === 'N' && e.ss === 'busy' && e.bed) {
+      cx += 3;
+      cy += 1.5;
+    }
+
+    // Determine color
+    let color;
+    if (e.tp === 'P') {
+      color = STATUS_COLORS[e.ss] || '#6b7280';
+    } else if (e.tp === 'D') {
+      color = '#10b981'; // green
+    } else {
+      color = '#06b6d4'; // cyan
+    }
+
+    let el = document.getElementById(eid);
+    if (!el) {
+      // Create new entity element
+      el = document.createElement('div');
+      el.id = eid;
+      el.className = 'ent ent-' + e.tp;
+      // Start at entrance for patients, station for staff
+      const startCoords = e.tp === 'P' ? (STATION_XY.entrance || [50,5]) : coords;
+      el.style.left = startCoords[0] + '%';
+      el.style.top = startCoords[1] + '%';
+      el.style.backgroundColor = color;
+      el.textContent = e.tp;
+      layer.appendChild(el);
+      // Force reflow so initial position is set before transition fires
+      el.offsetHeight;
+    }
+
+    // Update position (CSS transition animates the move)
+    el.style.left = cx + '%';
+    el.style.top = cy + '%';
+    el.style.backgroundColor = color;
+    el.style.color = '#fff';
+    el.textContent = e.tp;
+
+    // Glow when active (busy staff / patient being treated)
+    if ((e.tp !== 'P' && e.ss === 'busy') || (e.tp === 'P' && (e.ss === 'with_doctor' || e.ss === 'treatment'))) {
+      el.classList.add('glow');
+    } else {
+      el.classList.remove('glow');
+    }
+
+    // Tooltip
+    const label = e.tp === 'P' ? `Patient ${e.id}` : e.tp === 'D' ? `Doctor ${e.id}` : `Nurse ${e.id}`;
+    el.title = `${label} \u2014 ${e.ss}${e.bed ? ' (Bed ' + e.bed + ')' : ''}`;
+  });
+
+  // Remove entities that no longer exist
+  layer.querySelectorAll('.ent').forEach(el => {
+    if (!activeIds.has(el.id)) {
+      el.classList.add('removing');
+      setTimeout(() => { if (el.parentNode) el.remove(); }, 600);
+    }
+  });
 }
 </script>
 </body>
