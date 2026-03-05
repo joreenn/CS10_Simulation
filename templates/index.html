@@ -54,6 +54,10 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .control-group label{font-size:.75rem;color:var(--text2);font-weight:500;text-transform:uppercase;letter-spacing:.05em}
 .control-group input,.control-group select{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.5rem .8rem;color:var(--text);font-size:.9rem;font-family:inherit;transition:border-color .2s}
 .control-group input:focus{outline:none;border-color:var(--accent)}
+.speed-buttons{display:flex;gap:.4rem;flex-wrap:wrap}
+.speed-btn{background:var(--bg);border:2px solid var(--border);border-radius:8px;padding:.5rem .9rem;color:var(--text2);font-size:.85rem;font-weight:600;cursor:pointer;transition:all .2s;font-family:inherit}
+.speed-btn:hover{border-color:var(--accent);color:var(--text)}
+.speed-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 0 12px rgba(59,130,246,.3)}
 
 /* ── BUTTONS ── */
 .btn{padding:.7rem 1.8rem;border:none;border-radius:8px;font-weight:600;font-size:.9rem;cursor:pointer;transition:all .2s;font-family:inherit;display:inline-flex;align-items:center;gap:.5rem}
@@ -236,6 +240,17 @@ tr:hover td{background:rgba(59,130,246,.05)}
       <div class="control-group">
         <label>Replications</label>
         <input type="number" id="num_replications" value="30" min="1" max="100">
+      </div>
+      <div class="control-group">
+        <label>Simulation Speed</label>
+        <div class="speed-buttons">
+          <button class="speed-btn" data-speed="0.5">0.5x</button>
+          <button class="speed-btn active" data-speed="1">1x</button>
+          <button class="speed-btn" data-speed="2">2x</button>
+          <button class="speed-btn" data-speed="5">5x</button>
+          <button class="speed-btn" data-speed="10">10x</button>
+        </div>
+        <input type="hidden" id="speed" value="1">
       </div>
       <div class="control-group">
         <label>Mean Interarrival</label>
@@ -562,10 +577,19 @@ function switchTab(id) {
   document.getElementById('tab-' + id).classList.add('active');
 }
 
+// ── Speed Button Handlers ──
+document.querySelectorAll('.speed-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('speed').value = btn.dataset.speed;
+  });
+});
+
 // ── Start / Stop ──
 function startSim() {
   const params = {};
-  ['sim_duration','warmup_period','num_replications','mean_interarrival',
+  ['sim_duration','warmup_period','num_replications','speed','mean_interarrival',
    'num_triage_nurses','num_admin_staff','num_er_beds','num_doctors','num_nurses'
   ].forEach(k => { params[k] = document.getElementById(k).value; });
   resetLive();
@@ -675,6 +699,13 @@ socket.on('sim_complete', (d) => {
   setStatus('complete', 'Complete');
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnStop').classList.add('hidden');
+  // Force SIM TIME to show the full duration (e.g., 24:00)
+  if (d.params && d.params.sim_duration) {
+    const dur = d.params.sim_duration;
+    const hh = String(Math.floor(dur / 60)).padStart(2, '0');
+    const mm = String(Math.floor(dur % 60)).padStart(2, '0');
+    document.getElementById('kpi-time').textContent = hh + ':' + mm;
+  }
   buildResults(d);
 });
 

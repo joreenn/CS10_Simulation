@@ -27,6 +27,7 @@ sim_running = False
 # =============================================================================
 DEFAULT_PARAMS = {
     "sim_duration": 1440,
+    "speed": 1.0,
     "warmup_period": 0,
     "num_replications": 30,
     "mean_interarrival": 6,
@@ -382,6 +383,7 @@ class ERSimulation:
         if self.env.now < self.wp:
             yield self.env.timeout(self.wp - self.env.now)
         emit_interval = max(1, self.p["sim_duration"] // 100)
+        
         while self.env.now < self.total_time:
             if self.emit_live and sim_running:
                 dur = self.p["sim_duration"]
@@ -407,7 +409,9 @@ class ERSimulation:
                     "entities": self._entities_snapshot(),
                 }
                 self.sio.emit("live_snapshot", snapshot)
-                self.sio.sleep(0)
+                # Sleep based on speed parameter (higher speed = less delay)
+                sleep_time = 0.05 / self.p.get("speed", 1.0)
+                self.sio.sleep(sleep_time)
             yield self.env.timeout(emit_interval)
 
     def run(self):
@@ -508,6 +512,32 @@ def run_simulation(params):
 
         stats = sim.run()
 
+        # After SimPy finishes, emit a final 24:00 snapshot (outside SimPy)
+        if emit_live and sim_running:
+            dur = params["sim_duration"]
+            final_snapshot = {
+                "sim_time": float(dur),
+                "sim_hours": f"{int(dur // 60):02d}:{int(dur % 60):02d}",
+                "progress": 100.0,
+                "arrivals": sim.arrivals,
+                "discharged": sim.discharged,
+                "in_system": sim.arrivals - sim.discharged,
+                "beds_used": sim.er_bed.count,
+                "beds_total": params["num_er_beds"],
+                "bed_occ": round(sim.er_bed.count / params["num_er_beds"] * 100, 1),
+                "q_triage": len(sim.triage_nurse.queue),
+                "q_reg": len(sim.admin_staff.queue),
+                "q_bed": len(sim.er_bed.queue),
+                "q_doctor": len(sim.doctor.queue),
+                "triage_busy": round(sim.triage_busy / (max(0.001, dur) * params["num_triage_nurses"]) * 100, 1),
+                "admin_busy": round(sim.admin_busy / (max(0.001, dur) * params["num_admin_staff"]) * 100, 1),
+                "doctor_busy": round(sim.doctor_busy / (max(0.001, dur) * params["num_doctors"]) * 100, 1),
+                "patients_at": dict(sim.patients_at),
+                "entities": sim._entities_snapshot(),
+            }
+            socketio.emit("live_snapshot", final_snapshot)
+            socketio.sleep(0.1)
+
         if not sim_running:
             break
 
@@ -565,6 +595,7 @@ def handle_start(data):
 
     params = {
         "sim_duration": int(data.get("sim_duration", 1440)),
+        "speed": float(data.get("speed", 1.0)),
         "warmup_period": int(data.get("warmup_period", 0)),
         "num_replications": int(data.get("num_replications", 30)),
         "mean_interarrival": float(data.get("mean_interarrival", 6)),
