@@ -628,6 +628,135 @@ def print_report(results: List[ReplicationStats]):
             print(f"  {label} : {m:>8.2f}          "
                   f"95% CI [{lo:.2f}, {hi:.2f}]")
 
+    # ── Section 6: Interpretation & Summary ──
+    print("\n")
+    print("=" * 120)
+    print("  SECTION 6: INTERPRETATION & SUMMARY OF RESULTS")
+    print("=" * 120)
+
+    # Gather means for interpretation
+    throughput_mean = float(np.mean(df["Throughput"].values))
+    arrivals_mean = float(np.mean(df["Total Arrivals"].values))
+    avg_wait_doc = float(np.mean(df["Avg Wait for Doctor"].values))
+    avg_los_val = float(np.mean(df["Avg Length of Stay"].values))
+    bed_occ_val = float(np.mean(df["Bed Occupancy (%)"].values))
+    doc_util_val = float(np.mean(df["Doctor Util (%)"].values))
+    tri_util_val = float(np.mean(df["Triage Util (%)"].values))
+    adm_util_val = float(np.mean(df["Admin Util (%)"].values))
+    tri_wait_val = float(np.mean(df["Avg Triage Q Wait"].values))
+    reg_wait_val = float(np.mean(df["Avg Reg Q Wait"].values))
+    bed_wait_val = float(np.mean(df["Avg Bed Q Wait"].values))
+    doc_wait_val = float(np.mean(df["Avg Doctor Q Wait"].values))
+    max_tri_q = float(np.mean(df["Max Triage Q"].values))
+    max_reg_q = float(np.mean(df["Max Reg Q"].values))
+    max_bed_q = float(np.mean(df["Max Bed Q"].values))
+    max_doc_q = float(np.mean(df["Max Doctor Q"].values))
+    completion_pct = (throughput_mean / arrivals_mean * 100) if arrivals_mean > 0 else 0
+
+    # Determine bottleneck
+    res_utils = [
+        ("Triage Nurse", tri_util_val, NUM_TRIAGE_NURSES),
+        ("Admin Staff", adm_util_val, NUM_ADMIN_STAFF),
+        ("Doctors", doc_util_val, NUM_DOCTORS),
+    ]
+    res_utils.sort(key=lambda x: x[1], reverse=True)
+    bottleneck_name, bottleneck_util, bottleneck_count = res_utils[0]
+    least_name, least_util, _ = res_utils[-1]
+
+    # Determine worst queue
+    queue_stats = [
+        ("Triage", tri_wait_val, max_tri_q),
+        ("Registration", reg_wait_val, max_reg_q),
+        ("Bed Assignment", bed_wait_val, max_bed_q),
+        ("Doctor Evaluation", doc_wait_val, max_doc_q),
+    ]
+    queue_stats.sort(key=lambda x: x[1], reverse=True)
+    worst_q_name, worst_q_wait, _ = queue_stats[0]
+
+    def util_label(val):
+        if val > 100: return "OVER-SATURATED (unstable)"
+        if val > 85:  return "NEAR CAPACITY (high risk)"
+        if val > 60:  return "moderately utilized"
+        return "within acceptable range"
+
+    print()
+    print("  OVERALL SYSTEM PERFORMANCE")
+    print("  " + "-" * 70)
+    print(f"  The simulation ran {NUM_REPLICATIONS} independent replications, each")
+    print(f"  covering {SIM_DURATION} minutes ({SIM_DURATION / 60:.0f} hours) of ER operations.")
+    print(f"  On average, {arrivals_mean:.0f} patients arrived per run, and {throughput_mean:.0f}")
+    print(f"  patients were fully processed and discharged ({completion_pct:.1f}% completion rate).")
+    print(f"  The average patient waited {avg_wait_doc:.1f} minutes ({avg_wait_doc/60:.1f} hours)")
+    print(f"  from arrival before seeing a doctor.")
+    print(f"  The average total length of stay was {avg_los_val:.1f} minutes ({avg_los_val/60:.1f} hours).")
+    print()
+    print("  RESOURCE UTILIZATION INTERPRETATION")
+    print("  " + "-" * 70)
+    print(f"  Triage Nurse  ({NUM_TRIAGE_NURSES} available) : {tri_util_val:>6.1f}% — {util_label(tri_util_val)}")
+    if tri_util_val > 100:
+        print(f"      -> The triage station cannot keep up with patient arrivals,")
+        print(f"         causing the first major delay in the system.")
+    print(f"  Admin Staff   ({NUM_ADMIN_STAFF} available) : {adm_util_val:>6.1f}% — {util_label(adm_util_val)}")
+    if adm_util_val < 70:
+        print(f"      -> Registration is not a bottleneck and has spare capacity.")
+    print(f"  ER Beds       ({NUM_ER_BEDS} available) : {bed_occ_val:>6.1f}% occupied")
+    if bed_occ_val > 90:
+        print(f"      -> Beds are nearly full most of the time.")
+    elif bed_occ_val > 70:
+        print(f"      -> Bed occupancy is moderate; occasional waits may occur.")
+    else:
+        print(f"      -> Beds have sufficient capacity for current volume.")
+    print(f"  Doctors       ({NUM_DOCTORS} available) : {doc_util_val:>6.1f}% — {util_label(doc_util_val)}")
+    if doc_util_val > 100:
+        print(f"      -> Doctors are severely over-saturated. Patients in beds")
+        print(f"         are waiting excessively for physician evaluation.")
+    print()
+    print("  QUEUE & WAITING TIME INTERPRETATION")
+    print("  " + "-" * 70)
+    print(f"  Triage Queue       : Avg wait {tri_wait_val:>7.1f} min, peak queue length {max_tri_q:>5.0f} patients")
+    print(f"  Registration Queue : Avg wait {reg_wait_val:>7.1f} min, peak queue length {max_reg_q:>5.0f} patients")
+    print(f"  Bed Assignment Q   : Avg wait {bed_wait_val:>7.1f} min, peak queue length {max_bed_q:>5.0f} patients")
+    print(f"  Doctor Queue       : Avg wait {doc_wait_val:>7.1f} min, peak queue length {max_doc_q:>5.0f} patients")
+    print(f"  The longest wait occurs at the {worst_q_name} stage ({worst_q_wait:.1f} min avg).")
+    print()
+    print("  BOTTLENECK IDENTIFICATION")
+    print("  " + "-" * 70)
+    print(f"  Primary bottleneck : {bottleneck_name} at {bottleneck_util:.1f}% utilization")
+    print(f"                       ({bottleneck_count} currently available)")
+    if bottleneck_util > 100:
+        print(f"  -> With utilization exceeding 100%, the queue at this stage")
+        print(f"     grows continuously without bound. The system is fundamentally")
+        print(f"     UNSTABLE under current conditions.")
+    else:
+        print(f"  -> This resource is near maximum capacity.")
+    print(f"  Least constrained  : {least_name} at {least_util:.1f}% (most spare capacity)")
+    print()
+    print("  KEY TAKEAWAY & RECOMMENDATION")
+    print("  " + "-" * 70)
+    if bottleneck_util > 100:
+        needed = math.ceil(bottleneck_util / 85)
+        print(f"  The ER is UNABLE to keep pace with patient demand.")
+        print(f"  The {bottleneck_name} resource is over-saturated, causing cascading")
+        print(f"  delays throughout the entire patient flow.")
+        print(f"  RECOMMENDATION: Increase {bottleneck_name} to at least {needed} to bring")
+        print(f"  utilization below 85% and achieve system stability.")
+        if res_utils[1][1] > 100:
+            needed2 = math.ceil(res_utils[1][1] / 85)
+            print(f"  Additionally, {res_utils[1][0]} is also over-saturated at")
+            print(f"  {res_utils[1][1]:.1f}% and should be increased to at least {needed2}.")
+    elif bottleneck_util > 85:
+        print(f"  The system is operating near its capacity limit. While currently")
+        print(f"  stable, any increase in arrivals could push it into instability.")
+        print(f"  RECOMMENDATION: Add one more {bottleneck_name} during peak hours.")
+    else:
+        print(f"  The system is operating within acceptable capacity. All resources")
+        print(f"  have sufficient capacity for the current patient load.")
+        print(f"  RECOMMENDATION: Monitor {bottleneck_name} ({bottleneck_util:.1f}%) as it")
+        print(f"  will be the first to bottleneck if volume increases.")
+    print()
+    print(f"  Note: All values are means across {NUM_REPLICATIONS} replications.")
+    print(f"  Refer to Sections 2-5 above for confidence intervals and details.")
+
     print("\n" + "=" * 120)
     print("  Simulation complete.")
     print("=" * 120)

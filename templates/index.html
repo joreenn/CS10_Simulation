@@ -149,6 +149,19 @@ tr:hover td{background:rgba(59,130,246,.05)}
 .summary-metric .metric-val{font-size:1rem;font-weight:700}
 .summary-metric .metric-ci{font-size:.7rem;color:var(--text2);margin-left:.5rem}
 
+/* ── INTERPRETATION SECTION ── */
+.interpretation-card{background:linear-gradient(135deg,rgba(30,41,59,.95),rgba(15,23,42,.98));border:1px solid var(--border);border-radius:var(--radius);padding:1.8rem;box-shadow:var(--shadow);margin-bottom:1.5rem}
+.interpretation-card h3{font-size:1.1rem;font-weight:700;margin-bottom:1.2rem;display:flex;align-items:center;gap:.5rem;color:var(--accent2)}
+.interpretation-section{margin-bottom:1.2rem}
+.interpretation-section:last-child{margin-bottom:0}
+.interpretation-section h4{font-size:.9rem;font-weight:600;color:var(--orange);margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+.interpretation-section p{font-size:.85rem;color:var(--text);line-height:1.7;margin-bottom:.5rem}
+.interpretation-section p:last-child{margin-bottom:0}
+.interp-highlight{font-weight:700;color:var(--accent2)}
+.interp-warn{font-weight:700;color:var(--red)}
+.interp-ok{font-weight:700;color:var(--green)}
+.interp-divider{border:none;border-top:1px solid rgba(71,85,105,.4);margin:1rem 0}
+
 .hidden{display:none !important}
 
 /* ── FLOOR PLAN ── */
@@ -538,6 +551,12 @@ tr:hover td{background:rgba(59,130,246,.05)}
         <div class="chart-box"><canvas id="chartQueueWaits"></canvas></div>
       </div>
     </div>
+
+    <!-- Interpretation Section -->
+    <div class="interpretation-card" id="interpretationCard">
+      <h3>📝 Interpretation & Summary of Results</h3>
+      <div id="interpretationContent"></div>
+    </div>
   </div>
 </div>
 
@@ -850,9 +869,141 @@ function buildResults(data) {
   // Build charts
   buildResultCharts(reps, s);
 
+  // Build interpretation
+  buildInterpretation(s, data.params);
+
   // Build tables
   buildRepTable(reps);
   buildSummaryTable(s);
+}
+
+function buildInterpretation(s, params) {
+  const numReps = params ? params.num_replications : 30;
+  const simDur = params ? params.sim_duration : 1440;
+  const simHrs = (simDur / 60).toFixed(0);
+  const numDoctors = params ? params.num_doctors : 2;
+  const numTriage = params ? params.num_triage_nurses : 1;
+  const numAdmin = params ? params.num_admin_staff : 1;
+  const numBeds = params ? params.num_er_beds : 10;
+
+  const avgWait = s.avg_wait_doctor.mean;
+  const avgLOS = s.avg_los.mean;
+  const bedOcc = s.bed_occ.mean;
+  const docUtil = s.doctor_util.mean;
+  const triUtil = s.triage_util.mean;
+  const admUtil = s.admin_util.mean;
+  const throughput = s.throughput.mean;
+  const arrivals = s.total_arrivals.mean;
+
+  const triWait = s.avg_triage_wait.mean;
+  const regWait = s.avg_reg_wait.mean;
+  const bedWait = s.avg_bed_wait.mean;
+  const docWait = s.avg_doctor_wait.mean;
+  const maxTriQ = s.max_triage_q.mean;
+  const maxRegQ = s.max_reg_q.mean;
+  const maxBedQ = s.max_bed_q.mean;
+  const maxDocQ = s.max_doctor_q.mean;
+
+  // Helper: classify utilization
+  function utilClass(val) {
+    if (val > 100) return 'interp-warn';
+    if (val > 85) return 'interp-warn';
+    if (val > 60) return 'interp-highlight';
+    return 'interp-ok';
+  }
+  function utilLabel(val) {
+    if (val > 100) return 'over-saturated (unstable)';
+    if (val > 85) return 'near capacity (high risk)';
+    if (val > 60) return 'moderately utilized';
+    return 'within acceptable range';
+  }
+
+  // Find bottleneck
+  const resources = [
+    {name:'Triage Nurse', util:triUtil, count:numTriage},
+    {name:'Admin Staff', util:admUtil, count:numAdmin},
+    {name:'Doctors', util:docUtil, count:numDoctors},
+  ];
+  resources.sort((a,b) => b.util - a.util);
+  const bottleneck = resources[0];
+  const leastUsed = resources[resources.length - 1];
+
+  // Find longest queue
+  const queueData = [
+    {name:'Triage', wait:triWait, max:maxTriQ},
+    {name:'Registration', wait:regWait, max:maxRegQ},
+    {name:'Bed Assignment', wait:bedWait, max:maxBedQ},
+    {name:'Doctor Evaluation', wait:docWait, max:maxDocQ},
+  ];
+  queueData.sort((a,b) => b.wait - a.wait);
+  const worstQueue = queueData[0];
+
+  let html = '';
+
+  // 1. Overview
+  html += `<div class="interpretation-section">
+    <h4>📌 Overall System Performance</h4>
+    <p>The simulation ran <span class="interp-highlight">${numReps} independent replications</span>, each covering <span class="interp-highlight">${simHrs} hours</span> of ER operations. On average, <span class="interp-highlight">${arrivals.toFixed(0)} patients arrived</span> during each run, and <span class="interp-highlight">${throughput.toFixed(0)} patients were fully processed and discharged</span>. This means approximately <span class="${throughput < arrivals * 0.8 ? 'interp-warn' : 'interp-ok'}">${((throughput / arrivals) * 100).toFixed(1)}%</span> of arriving patients completed their full ER journey within the simulation period.</p>
+    <p>The average patient <b>waited ${avgWait.toFixed(1)} minutes (${(avgWait/60).toFixed(1)} hours)</b> from arrival before seeing a doctor, as shown in the <b>Queue Wait Times chart</b>. The total <b>average length of stay was ${avgLOS.toFixed(1)} minutes (${(avgLOS/60).toFixed(1)} hours)</b>, visible in the <b>Avg Length of Stay by Replication chart</b> which shows consistency across all ${numReps} runs.</p>
+  </div>`;
+
+  html += '<hr class="interp-divider">';
+
+  // 2. Resource Utilization
+  html += `<div class="interpretation-section">
+    <h4>🏥 Resource Utilization Analysis</h4>
+    <p>As shown in the <b>Resource Utilization Comparison chart</b>, the resources performed as follows:</p>
+    <p>• <b>Triage Nurse</b> (${numTriage} available): <span class="${utilClass(triUtil)}">${triUtil.toFixed(1)}% utilized — ${utilLabel(triUtil)}</span>. ${triUtil > 100 ? 'The triage station cannot keep up with patient arrivals, causing the first major delay in the system.' : triUtil > 85 ? 'The triage station is operating close to its limit and any increase in arrivals could destabilize it.' : 'The triage station has adequate capacity to handle current demand.'}</p>
+    <p>• <b>Administrative Staff</b> (${numAdmin} available): <span class="${utilClass(admUtil)}">${admUtil.toFixed(1)}% utilized — ${utilLabel(admUtil)}</span>. ${admUtil < 70 ? 'Registration is not a bottleneck and has spare capacity.' : 'Registration processing is contributing to patient delays.'}</p>
+    <p>• <b>ER Beds</b> (${numBeds} available): <span class="${utilClass(bedOcc)}">${bedOcc.toFixed(1)}% occupied</span>. ${bedOcc > 90 ? 'Beds are nearly full most of the time, contributing to patient backup.' : bedOcc > 70 ? 'Bed occupancy is moderate; patients may occasionally wait for beds.' : 'Beds have sufficient capacity for current patient volume.'}</p>
+    <p>• <b>Doctors</b> (${numDoctors} available): <span class="${utilClass(docUtil)}">${docUtil.toFixed(1)}% utilized — ${utilLabel(docUtil)}</span>. ${docUtil > 100 ? 'Doctors are severely over-saturated, meaning patients in beds are waiting excessively for physician evaluation.' : docUtil > 85 ? 'Doctors are near maximum capacity and delays are building.' : 'Doctor availability is adequate for the current patient load.'}</p>
+  </div>`;
+
+  html += '<hr class="interp-divider">';
+
+  // 3. Queue Analysis
+  html += `<div class="interpretation-section">
+    <h4>⏳ Queue & Waiting Time Analysis</h4>
+    <p>The <b>Queue Wait Times chart</b> shows the average time patients spend waiting at each stage:</p>
+    <p>• <b>Triage Queue</b>: Average wait of <span class="${triWait > 30 ? 'interp-warn' : triWait > 10 ? 'interp-highlight' : 'interp-ok'}">${triWait.toFixed(1)} minutes</span>, with a peak queue length of ${maxTriQ.toFixed(0)} patients.</p>
+    <p>• <b>Registration Queue</b>: Average wait of <span class="${regWait > 30 ? 'interp-warn' : regWait > 10 ? 'interp-highlight' : 'interp-ok'}">${regWait.toFixed(1)} minutes</span>, with a peak queue length of ${maxRegQ.toFixed(0)} patients.</p>
+    <p>• <b>Bed Assignment Queue</b>: Average wait of <span class="${bedWait > 30 ? 'interp-warn' : bedWait > 10 ? 'interp-highlight' : 'interp-ok'}">${bedWait.toFixed(1)} minutes</span>, with a peak queue length of ${maxBedQ.toFixed(0)} patients.</p>
+    <p>• <b>Doctor Queue</b>: Average wait of <span class="${docWait > 30 ? 'interp-warn' : docWait > 10 ? 'interp-highlight' : 'interp-ok'}">${docWait.toFixed(1)} minutes</span>, with a peak queue length of ${maxDocQ.toFixed(0)} patients.</p>
+    <p>The longest wait occurs at the <span class="interp-warn">${worstQueue.name} stage (${worstQueue.wait.toFixed(1)} min avg)</span>, which aligns with the resource utilization findings above.</p>
+  </div>`;
+
+  html += '<hr class="interp-divider">';
+
+  // 4. Bottleneck Identification
+  html += `<div class="interpretation-section">
+    <h4>🔍 Bottleneck Identification</h4>
+    <p>The primary bottleneck in this system is the <span class="interp-warn">${bottleneck.name}</span> at <span class="interp-warn">${bottleneck.util.toFixed(1)}% utilization</span> (${bottleneck.count} currently available). ${bottleneck.util > 100 ? 'With utilization exceeding 100%, the queue at this stage grows continuously without bound, meaning the system is fundamentally unstable under current conditions.' : 'This resource is operating near its maximum capacity and even small increases in demand can cause significant delays.'}</p>
+    <p>The least constrained resource is <span class="interp-ok">${leastUsed.name}</span> at <span class="interp-ok">${leastUsed.util.toFixed(1)}%</span>, indicating it has the most spare capacity.</p>
+    <p>As seen in the <b>Replication Throughput chart</b>, the number of patients discharged per run is relatively consistent across replications, confirming that throughput is limited by these resource constraints rather than random variation.</p>
+  </div>`;
+
+  html += '<hr class="interp-divider">';
+
+  // 5. Conclusion / Recommendation
+  html += `<div class="interpretation-section">
+    <h4>💡 Key Takeaway & Recommendation</h4>`;
+
+  if (bottleneck.util > 100) {
+    const needed = Math.ceil(bottleneck.util / 85);
+    html += `<p>The simulation data clearly shows that the ER is <span class="interp-warn">unable to keep pace with patient demand</span> in its current configuration. The ${bottleneck.name} resource is over-saturated, which causes cascading delays throughout the entire patient flow.</p>
+    <p><b>Recommendation:</b> Increase the number of ${bottleneck.name} to at least <span class="interp-highlight">${needed}</span> to bring utilization below 85% and achieve system stability. ${resources[1] && resources[1].util > 100 ? 'Additionally, <b>' + resources[1].name + '</b> is also over-saturated at ' + resources[1].util.toFixed(1) + '% and should also be increased.' : ''}</p>`;
+  } else if (bottleneck.util > 85) {
+    html += `<p>The system is operating <span class="interp-warn">near its capacity limit</span>. While currently stable, any increase in patient arrivals could push the system into an unstable state.</p>
+    <p><b>Recommendation:</b> Consider adding one more ${bottleneck.name} during peak hours to provide a safety margin and reduce patient waiting times.</p>`;
+  } else {
+    html += `<p>The system is operating <span class="interp-ok">within acceptable capacity</span>. All resources have sufficient capacity to handle the current patient load without excessive delays.</p>
+    <p><b>Recommendation:</b> Current staffing levels are adequate. Monitor the ${bottleneck.name} utilization (${bottleneck.util.toFixed(1)}%) as it represents the tightest resource. If patient volume increases, this will be the first resource to become a bottleneck.</p>`;
+  }
+
+  html += `<p style="margin-top:.8rem;font-size:.8rem;color:var(--text2)"><em>Note: All values above are means across ${numReps} replications. Refer to the KPI cards above for 95% confidence intervals, the charts for visual trends, and the Details tab for per-replication data.</em></p>`;
+  html += '</div>';
+
+  document.getElementById('interpretationContent').innerHTML = html;
 }
 
 function buildResultCharts(reps, summary) {
